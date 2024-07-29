@@ -149,15 +149,7 @@ const getAiSuggestions = async (req, res) => {
       return res.status(404).json({ msg: "Resume not found" });
     }
 
-    const inputData = {
-      jobDescription,
-      resume: {
-        personalInformation: resume.personalInformation,
-        workExperience: resume.workExperience,
-        education: resume.education,
-        skills: resume.skills,
-      },
-    };
+    const inputData = resume;
 
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
     const prompt = generatePrompt(inputData);
@@ -176,16 +168,19 @@ const getAiSuggestions = async (req, res) => {
 
 function generatePrompt(data) {
   return `
-  Job Description:
-  ${data.jobDescription}
+  
 
   Resume:
-  Personal Information: ${JSON.stringify(data.resume.personalInformation)}
-  Work Experience: ${JSON.stringify(data.resume.workExperience)}
-  Education: ${JSON.stringify(data.resume.education)}
-  Skills: ${JSON.stringify(data.resume.skills)}
+  Name : ${JSON.stringify(data.firstName)}  ${JSON.stringify(data.lastName)} 
+  address: ${JSON.stringify(data.address)} 
+  phone: ${JSON.stringify(data.phone)} 
+  email:  ${JSON.stringify(data.email)} 
+  summery:${JSON.stringify}
+  Work Experience: ${JSON.stringify(data.experience)}
+  Education: ${JSON.stringify(data.education)}
+  Skills: ${JSON.stringify(data.skills)}
 
-  Please provide suggestions to improve the resume for the job described above.
+  Please provide review  to improve the resume for the  above resume.
   `;
 }
 
