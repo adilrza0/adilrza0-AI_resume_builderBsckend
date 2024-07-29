@@ -13,6 +13,7 @@ const ResumeSchema = new mongoose.Schema({
   experience: [
     {
       id:Number,
+      title:String,
       companyName: String,
       city:String,
       state:String,
