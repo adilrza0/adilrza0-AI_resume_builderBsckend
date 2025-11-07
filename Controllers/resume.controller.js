@@ -3,13 +3,50 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 require("dotenv").config();
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+// AI helpers: delay, rate-limit detection, and retry wrapper
+const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+const isRateLimitError = (e) => {
+  const msg = String(e?.message || "");
+  return e?.status === 429 || msg.includes("429") || msg.includes("RATE_LIMIT_EXCEEDED");
+};
+
+async function callGeminiWithRetry(prompt, { modelName = "gemini-1.5-flash-8b", maxOutputTokens = 768 } = {}) {
+  if (!process.env.GEMINI_API_KEY) {
+    const err = new Error("AI not configured: missing GEMINI_API_KEY");
+    err.code = "AI_NOT_CONFIGURED";
+    throw err;
+  }
+  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+  const model = genAI.getGenerativeModel({ model: modelName });
+  let attempt = 0;
+  const maxRetries = 2;
+  const baseDelay = 800;
+  while (true) {
+    try {
+      const result = await model.generateContent({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens },
+      });
+      return result?.response?.text?.() ?? "";
+    } catch (e) {
+      if (isRateLimitError(e) && attempt < maxRetries) {
+        const jitter = Math.floor(Math.random() * 200);
+        const wait = baseDelay * Math.pow(2, attempt) + jitter;
+        await delay(wait);
+        attempt += 1;
+        continue;
+      }
+      throw e;
+    }
+  }
+}
 
 const getResumebyId = async (req, res) => {
-  console.log(req.params)
   try {
     const resumebyId = await Resume.findById(req.params.id);
-    console.log(resumebyId)
+    if (!resumebyId) {
+      return res.status(404).json({ msg: "Resume not found" });
+    }
     res.json(resumebyId);
   } catch (error) {
     res.status(500).send({ err: error });
@@ -79,7 +116,6 @@ const editResume = async (req, res) => {
     education,
     skills
   } = req.body;
-  console.log(summery)
   try {
     const resume = await Resume.findById(req.params.id);
 
@@ -106,9 +142,6 @@ const editResume = async (req, res) => {
     if (skills !== undefined) resume.skills = skills;
 
     await resume.save();
-    const resume1 = await Resume.findById(req.params.id);
-    console.log(resume1)
-    
     res.json(resume);
   } catch (err) {
     console.error(err.message);
@@ -117,10 +150,8 @@ const editResume = async (req, res) => {
 };
 
 const deleteResume = async (req, res) => {
-  console.log(req.params)
   try {
     const resume = await Resume.findById(req.params.id);
-    console.log(resume)
 
     if (!resume) {
       return res.status(404).json({ msg: "Resume not found" });
@@ -139,48 +170,46 @@ const deleteResume = async (req, res) => {
 };
 
 const getAiSuggestions = async (req, res) => {
-  const { jobDescription } = req.body;
+  const { jobDescription } = req.body || {};
 
   try {
     const resume = await Resume.findById(req.params.id);
-    console.log(resume);
 
     if (!resume) {
       return res.status(404).json({ msg: "Resume not found" });
     }
 
-    const inputData = resume;
-
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-    const prompt = generatePrompt(inputData);
-    const result = await model.generateContent(prompt);
-
-    const response = await result.response;
-    const suggestions = response.text();
-
-    console.log(suggestions);
+    const modelName = req.query.model || "gemini-1.5-flash-8b";
+    const prompt = generatePrompt(resume, jobDescription);
+    const suggestions = await callGeminiWithRetry(prompt, { modelName, maxOutputTokens: 768 });
     res.json({ suggestions });
   } catch (err) {
+    if (err.code === "AI_NOT_CONFIGURED") {
+      return res.status(503).json({ error: "AI is not configured on the server" });
+    }
+    if (isRateLimitError(err)) {
+      return res.status(429).json({ error: "AI rate limit exceeded. Please try again later." });
+    }
     console.error("Error fetching AI suggestions:", err);
     res.status(500).json({ error: "Failed to get AI suggestions" });
   }
 };
 
-function generatePrompt(data) {
+function generatePrompt(data, jobDescription) {
   return `
-  
-
   Resume:
-  Name : ${JSON.stringify(data.firstName)}  ${JSON.stringify(data.lastName)} 
-  address: ${JSON.stringify(data.address)} 
-  phone: ${JSON.stringify(data.phone)} 
-  email:  ${JSON.stringify(data.email)} 
-  summery:${JSON.stringify}
+  Name: ${JSON.stringify(data.firstName)} ${JSON.stringify(data.lastName)}
+  Address: ${JSON.stringify(data.address)}
+  Phone: ${JSON.stringify(data.phone)}
+  Email: ${JSON.stringify(data.email)}
+  Summary: ${JSON.stringify(data.summery)}
   Work Experience: ${JSON.stringify(data.experience)}
   Education: ${JSON.stringify(data.education)}
   Skills: ${JSON.stringify(data.skills)}
+  ${jobDescription ? `\nJob Description (target role): ${JSON.stringify(jobDescription)}` : ""}
 
-  Please provide review  to improve the resume for the  above resume.
+  Provide specific, actionable suggestions to improve this resume for the target role.
+  Focus on impact verbs, quantifiable outcomes, and relevance. Output 5-8 concise bullet points.
   `;
 }
 

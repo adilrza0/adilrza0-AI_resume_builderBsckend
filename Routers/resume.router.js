@@ -10,7 +10,8 @@ resumeRouter.get("/",auth,getAllResumesbyUserId)
 
 // @route POST api/resumes
 // @desc Create a new resume
-resumeRouter.get('/:id',auth,getResumebyId)
+// Public read: allow sharing resume view by id
+resumeRouter.get('/:id', getResumebyId)
 
 // @route POST api/resumes
 // @desc Create a new resume
